@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Real-Time Location Tracker</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.fullscreen/Control.FullScreen.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet-compass/dist/leaflet-compass.min.css" />
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+        }
+        #map {
+            height: 400px;
+            width: 100%;
+        }
+        #details {
+            font-size: 20px;
+            margin-top: 10px;
+            color: #333; /* Dark text color */
+        }
+        #details div {
+            margin: 5px 0;
+        }
+        #driver-name {
+            color: #000000; /* Blue color for driver name */
+        }
+        #bus-number-plate {
+            color: #000000; /* Orange color for bus number plate */
+        }
+        #incharge-name {
+            color: #000000; /* Purple color for in-charge name */
+        }
+        /* Style for the logo */
+        #logo {
+            display: block;
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            width: 400px; /* Adjust the width as needed */
+            height: auto; /* Maintain aspect ratio */
+        }
+        /* Style for the header */
+        h1 {
+            color: #333; /* Dark text color */
+            margin-top: 120px; /* Adjust margin to accommodate logo */
+            padding: 10px;
+            border-bottom: 5px solid #e91e63; /* Pink underline */
+        }
+        /* Style for the footer */
+        footer {
+            text-align: center;
+            margin-top: 20px;
+            font-size: 18px;
+            color: #333; /* Dark text color */
+        }
+        /* Style for links */
+        a {
+            color: #e51313; /* Pink color for links */
+        }
+    </style>
+</head>
+<body>
+    <img id="logo" src="klulogo3.png" alt="KLH University Logo"> <!-- Updated logo image path -->
+    <h1>Real-Time Location Tracker</h1>
+    <div id="map"></div>
+    <div id="details">
+        <div>Driver Name: <span id="driver-name"></span></div>
+        <div>Bus Number Plate: <span id="bus-number-plate"></span></div>
+        <div>In-charge Name: <span id="incharge-name"></span></div>
+    </div>
+
+    <footer>
+        Powered by <a href="https://www.kluniversity.in" target="_blank">KL University</a>
+    </footer>
+
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet.fullscreen/Control.FullScreen.js"></script>
+    <script src="https://unpkg.com/leaflet-compass/dist/leaflet-compass.min.js"></script>
+    <script>
+        // Initialize the map and set its view to a default location
+        var map = L.map('map').setView([51.505, -0.09], 13);
+
+        // Set up the OSM layer
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        }).addTo(map);
+
+        // Add full-screen control
+        map.addControl(new L.Control.FullScreen());
+
+        var markers = {};
+        var userMarker;
+
+        // Function to update the location on the map
+        function updateLocation(userId, lat, lng) {
+            if (!markers[userId]) {
+                // Create a new marker for the user
+                markers[userId] = L.marker([lat, lng]).addTo(map)
+                    .bindPopup("<b style='color: #333;'>User " + userId + " is here!</b>")
+                    .openPopup();
+            } else {
+                // Update the existing marker location
+                markers[userId].setLatLng([lat, lng]);
+            }
+            if (userId === userIdentifier) {
+                userMarker = markers[userId];
+            }
+        }
+
+        // Function to remove the marker
+        function removeMarker(userId) {
+            if (markers[userId]) {
+                map.removeLayer(markers[userId]);
+                delete markers[userId];
+            }
+        }
+
+        // Establish WebSocket connection
+        var userIdentifier = Math.floor(Math.random() * 1000); // Random user ID for demonstration
+        var ws = new WebSocket('ws://localhost:8080'); // Connect to the WebSocket server
+
+        ws.onopen = function() {
+            console.log('Connected to WebSocket server');
+            if (navigator.geolocation) {
+                navigator.geolocation.watchPosition(function(position) {
+                    var lat = position.coords.latitude;
+                    var lng = position.coords.longitude;
+                    ws.send(JSON.stringify({ action: 'update', userId: userIdentifier, lat: lat, lng: lng }));
+                });
+            } else {
+                alert("Geolocation is not supported by this browser.");
+            }
+        };
+
+        ws.onmessage = function(event) {
+            var data = JSON.parse(event.data);
+            if (data.action === 'update') {
+                updateLocation(data.userId, data.lat, data.lng);
+            } else if (data.action === 'disconnect') {
+                removeMarker(data.userId);
+            }
+        };
+
+        ws.onclose = function() {
+            console.log('Disconnected from WebSocket server');
+            removeMarker(userIdentifier);
+        };
+
+        // Handle tab visibility change
+        document.addEventListener('visibilitychange', function() {
+            if (document.hidden) {
+                ws.send(JSON.stringify({ action: 'disconnect', userId: userIdentifier }));
+            } else {
+                if (navigator.geolocation) {
+                    navigator.geolocation.watchPosition(function(position) {
+                        var lat = position.coords.latitude;
+                        var lng = position.coords.longitude;
+                        ws.send(JSON.stringify({ action: 'update', userId: userIdentifier, lat: lat, lng: lng }));
+                    });
+                }
+            }
+        });
+
+        // Add recenter control
+        L.Control.recenterControl = L.Control.extend({
+            onAdd: function(map) {
+                var div = L.DomUtil.create('div', 'leaflet-bar recenter-control');
+                div.innerHTML = '<select id="recenter-select" style="width: 100%; padding: 5px;">' +
+                                '<option value="">Recenter to...</option>' +
+                                '</select>';
+                div.style.backgroundColor = 'white';
+                div.style.width = '120px';
+                div.style.height = 'auto';
+                div.style.cursor = 'pointer';
+                div.title = 'Recenter map';
+                L.DomEvent.on(div, 'change', function(e) {
+                    var selectedUserId = e.target.value;
+                    if (selectedUserId && markers[selectedUserId]) {
+                        map.setView(markers[selectedUserId].getLatLng(), map.getZoom());
+                    }
+                });
+                return div;
+            }
+        });
+
+        L.control.recenterControl = function(opts) {
+            return new L.Control.recenterControl(opts);
+        }
+
+        // Add the control to the map
+        L.control.recenterControl({ position: 'bottomright' }).addTo(map);
+
+        // Function to update the recenter dropdown with user IDs
+        function updateRecenterDropdown() {
+            var select = document.getElementById('recenter-select');
+            select.innerHTML = '<option value="">Recenter to...</option>';
+            for (var userId in markers) {
+                if (markers.hasOwnProperty(userId)) {
+                    var option = document.createElement('option');
+                    option.value = userId;
+                    option.text = 'User ' + userId;
+                    select.appendChild(option);
+                }
+            }
+        }
+
+        // Update the recenter dropdown every 5 seconds
+        setInterval(updateRecenterDropdown, 5000);
+
+        // Function to simulate fetching driver and bus details
+        function getBusDetails() {
+            return {
+                driverName: "shivam",
+                busNumberPlate: "TS 09 AB 1234",
+                inchargeName: "Rakesh"
+            };
+        }
+
+        // Function to update the bus details
+        function updateBusDetails() {
+            var details = getBusDetails();
+            document.getElementById('driver-name').innerHTML = details.driverName;
+            document.getElementById('bus-number-plate').innerHTML = details.busNumberPlate;
+            document.getElementById('incharge-name').innerHTML = details.inchargeName;
+        }
+
+        // Call the function to update bus details
+        updateBusDetails();
+    </script>
+</body>
+</html>
